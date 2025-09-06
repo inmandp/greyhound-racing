@@ -19,7 +19,10 @@ from typing import Optional
 # Ensure src on path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.extractors.race_card_extractor import extract_todays_races
+from src.extractors.race_card_extractor import (
+    extract_todays_races,
+    extract_historical_races,
+)
 from src.extractors.dog_stats_extractor import extract_dog_statistics
 from src.processors.feature_engineer import engineer_features, FeatureEngineer
 from src.utils.config import config
@@ -34,14 +37,14 @@ class GreyhoundPipeline:
         self.logger = get_logger(__name__)
 
     # --- Public API -----------------------------------------------------------------
-    def run_full_pipeline(self) -> bool:
+    def run_full_pipeline(self, mode: str = "today", start_date: Optional[str] = None, end_date: Optional[str] = None) -> bool:
         self.logger.info("=" * 60)
         self.logger.info("GREYHOUND RACING DATA PIPELINE STARTED")
         self.logger.info("=" * 60)
         start_time = datetime.now()
 
         try:
-            race_data = self._extract_race_cards()
+            race_data = self._extract_race_cards(mode=mode, start_date=start_date, end_date=end_date)
             if race_data is None or race_data.empty:
                 self.logger.error("Race card extraction produced no data; aborting")
                 return False
@@ -67,13 +70,33 @@ class GreyhoundPipeline:
             self.logger.info("=" * 60)
 
     # --- Internal Steps -------------------------------------------------------------
-    def _extract_race_cards(self) -> Optional[object]:
+    def _extract_race_cards(self, mode: str = "today", start_date: Optional[str] = None, end_date: Optional[str] = None) -> Optional[object]:
         self.logger.info("Step 1: Extracting race cards ...")
         try:
-            race_data = extract_todays_races()
+            date_label: Optional[str] = None
+            if mode == "historical":
+                if not start_date and not end_date:
+                    raise ValueError("Historical mode requires start_date and/or end_date (YYYY-MM-DD)")
+                if start_date and not end_date:
+                    end_date = start_date
+                if end_date and not start_date:
+                    start_date = end_date
+                self.logger.info("Historical extraction for %s to %s", start_date, end_date)
+                race_data = extract_historical_races(start_date=start_date, end_date=end_date)
+                # Build a date-aware label for the results file name
+                if start_date and end_date:
+                    if start_date == end_date:
+                        date_label = start_date
+                    else:
+                        date_label = f"{start_date}_to_{end_date}"
+            else:
+                race_data = extract_todays_races()
             if race_data is None or race_data.empty:
                 return None
-            race_file = config.get_file_path("race_cards")
+            if mode == "historical":
+                race_file = config.get_file_path("race_results", date_label)
+            else:
+                race_file = config.get_file_path("race_cards")
             race_data.to_csv(race_file, index=False)
             self.logger.info(
                 "Race cards extracted: %d entries | Tracks=%d | Races=%d | File=%s",
@@ -167,8 +190,16 @@ class GreyhoundPipeline:
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Greyhound Racing Data Pipeline")
+    parser.add_argument("--mode", choices=["today", "historical"], default="today", help="Extraction mode")
+    parser.add_argument("--start-date", dest="start_date", help="Start date YYYY-MM-DD for historical mode", default=None)
+    parser.add_argument("--end-date", dest="end_date", help="End date YYYY-MM-DD for historical mode", default=None)
+    args = parser.parse_args()
+
     pipeline = GreyhoundPipeline()
-    success = pipeline.run_full_pipeline()
+    success = pipeline.run_full_pipeline(mode=args.mode, start_date=args.start_date, end_date=args.end_date)
     if success:
         print("\nPipeline completed successfully. See logs & data/processed.")
     else:

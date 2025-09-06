@@ -3,6 +3,7 @@ Browser utilities for web scraping operations.
 """
 
 import time
+import os
 from selenium.webdriver.chrome.options import Options
 
 
@@ -30,6 +31,13 @@ def setup_chrome_options() -> Options:
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
+    # Allow overriding Chrome binary path via env var for CI/containers
+    binary = os.environ.get("CHROME_BINARY")
+    if binary:
+        try:
+            chrome_options.binary_location = binary
+        except Exception:
+            pass
     
     # Speed optimizations via preferences
     prefs = {

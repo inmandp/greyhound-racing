@@ -17,6 +17,8 @@ class Config:
     PROCESSED_DATA_DIR = DATA_DIR / "processed"
     LOGS_DIR = PROJECT_ROOT / "logs"
     CONFIG_DIR = PROJECT_ROOT / "config"
+    # Subfolder specifically for historical results
+    RAW_RESULTS_DIR = RAW_DATA_DIR / "results"
     
     # URLs
     RACING_POST_URL = "https://greyhoundbet.racingpost.com/"
@@ -63,6 +65,7 @@ class Config:
     # File naming patterns
     FILE_PATTERNS = {
         "race_cards": "race_cards_{date}.csv",
+    "race_results": "results_{date}.csv",
         "dog_stats": "dog_stats_{date}.csv",
         "daily_model": "todays_model.csv",
         "historical_model": "modeling_ready_dataset_historical.csv",
@@ -83,6 +86,7 @@ class Config:
         directories = [
             cls.DATA_DIR,
             cls.RAW_DATA_DIR,
+            cls.RAW_RESULTS_DIR,
             cls.PROCESSED_DATA_DIR,
             cls.LOGS_DIR,
             cls.CONFIG_DIR
@@ -110,6 +114,8 @@ class Config:
         pattern = cls.FILE_PATTERNS.get(file_type, f"{file_type}_{date_str}.csv")
         filename = pattern.format(date=date_str)
         
+        if file_type == "race_results":
+            return cls.RAW_RESULTS_DIR / filename
         if file_type in ["race_cards", "dog_stats"]:
             return cls.RAW_DATA_DIR / filename
         elif file_type in ["daily_model", "historical_model"]:
