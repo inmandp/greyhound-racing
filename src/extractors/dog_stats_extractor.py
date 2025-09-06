@@ -7,6 +7,7 @@ import time
 import random
 import pandas as pd
 import requests
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional
 from urllib.parse import quote
@@ -48,26 +49,29 @@ class DogStatsExtractor:
             DataFrame with detailed dog statistics
         """
         unique_dogs = race_data['Dog_Name'].unique()
-        print(f"Extracting stats for {len(unique_dogs)} unique dogs...")
+        print(f"Extracting RAW site stats for {len(unique_dogs)} unique dogs...")
         print(f"Using {max_workers} workers with {self.request_delay}s delay between requests")
-        
+
         all_stats = []
         failed_dogs = []
-        
+
         # Use sequential processing for better rate limiting control
         if max_workers == 1:
             print("Using sequential processing for better rate limiting...")
             for i, dog_name in enumerate(unique_dogs, 1):
                 print(f"Progress: {i}/{len(unique_dogs)} - Processing {dog_name}")
-                
+
                 stats = self._get_dog_stats_with_retry(dog_name)
                 if stats:
-                    all_stats.append(stats)
+                    if isinstance(stats, list):
+                        all_stats.extend(stats)
+                    else:
+                        all_stats.append(stats)
                     print(f"✓ Stats extracted for {dog_name}")
                 else:
                     failed_dogs.append(dog_name)
                     print(f"✗ Failed to extract stats for {dog_name}")
-                
+
                 # Add delay between requests
                 if i < len(unique_dogs):  # Don't sleep after the last request
                     delay = self.request_delay + random.uniform(0.5, 1.5)  # Add random jitter
@@ -77,17 +81,20 @@ class DogStatsExtractor:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
                 future_to_dog = {
-                    executor.submit(self._get_dog_stats_with_retry, dog_name): dog_name 
+                    executor.submit(self._get_dog_stats_with_retry, dog_name): dog_name
                     for dog_name in unique_dogs
                 }
-                
+
                 # Collect results
                 for future in as_completed(future_to_dog):
                     dog_name = future_to_dog[future]
                     try:
                         stats = future.result()
                         if stats:
-                            all_stats.append(stats)
+                            if isinstance(stats, list):
+                                all_stats.extend(stats)
+                            else:
+                                all_stats.append(stats)
                             print(f"✓ Stats extracted for {dog_name}")
                         else:
                             failed_dogs.append(dog_name)
@@ -95,7 +102,7 @@ class DogStatsExtractor:
                     except Exception as e:
                         failed_dogs.append(dog_name)
                         print(f"✗ Error extracting stats for {dog_name}: {e}")
-        
+
         # Report results
         if failed_dogs:
             print(f"\n⚠️  Failed to extract stats for {len(failed_dogs)} dogs:")
@@ -103,13 +110,13 @@ class DogStatsExtractor:
                 print(f"   - {dog}")
             if len(failed_dogs) > 10:
                 print(f"   ... and {len(failed_dogs) - 10} more")
-        
+
         if all_stats:
             stats_df = pd.DataFrame(all_stats)
-            print(f"\n✅ Successfully extracted stats for {len(stats_df)} out of {len(unique_dogs)} dogs")
+            print(f"\n✅ Successfully extracted raw stats for {len(stats_df)} out of {len(unique_dogs)} dogs")
             return stats_df
         else:
-            print("\n❌ No stats extracted")
+            print("\n❌ No raw stats extracted")
             return pd.DataFrame()
     
     def _get_dog_stats_with_retry(self, dog_name: str, track_name: str = None) -> Optional[Dict]:
@@ -259,71 +266,36 @@ class DogStatsExtractor:
     
     def _parse_dog_stats(self, html: str, dog_name: str) -> Optional[Dict]:
         """
-        Parse detailed statistics from dog's page using the working logic from the old file.
-        
-        Args:
-            html: HTML content from dog's detail page
-            dog_name: Name of the dog
-            
-        Returns:
-            Dictionary with parsed statistics
+        Parse RAW statistics from the dog's page (as-is from the site).
+        Returns only values as presented by the summary table (no derived fields).
         """
         try:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(html, 'html.parser')
-            
-            # Extract summary statistics
-            summary_stats = self._extract_summary_stats(soup, dog_name)
-            
-            # Extract detailed race history
-            race_history = self._extract_race_history(soup, dog_name)
-            
-            # Combine summary with additional calculated fields
-            stats = {
-                'Dog_Name': dog_name,
-                'Total_Runs': summary_stats.get('total_runs', 0),
-                'Wins': summary_stats.get('total_wins', 0),
-                'Win_Percentage': summary_stats.get('win_percentage', 0.0),
-                'Places': 0,  # Would need additional parsing
-                'Place_Percentage': 0.0,  # Would need additional parsing
-                'Best_Time': None,  # Would need additional parsing
-                'Average_Time': None,  # Would need additional parsing
-                'Recent_Form': '',  # Would need additional parsing
-                'Career_Earnings': 0.0,  # Would need additional parsing
-                'Last_Run_Date': None,  # Would need additional parsing
-                'Age': None,  # Would need additional parsing
-                'Sex': None,  # Would need additional parsing
-                'Color': None,  # Would need additional parsing
-                'Sire': None,  # Would need additional parsing
-                'Dam': None,  # Would need additional parsing
-                'Trainer': None,  # Would need additional parsing
-                'Owner': None,  # Would need additional parsing
-                'Race_Count': len(race_history) if race_history else 0,
-                'Track': summary_stats.get('track', 'All Tracks')
-            }
-            
-            return stats
-            
+
+            # Return the raw race history table rows for this dog
+            rows = self._extract_history_table_rows(soup, dog_name)
+            return rows
+
         except Exception as e:
-            print(f"Error parsing stats for {dog_name}: {e}")
+            print(f"Error parsing raw stats for {dog_name}: {e}")
             return None
     
-    def _extract_summary_stats(self, soup, dog_name, track_name=None):
+    def _extract_summary_stats_raw(self, soup, dog_name, track_name=None):
         """
-        Extract the summary statistics table (Runs, Wins, Win %).
+        Extract the summary statistics table (Runs, Wins, Win %) as raw text values.
         """
         summary = {
             'dog_name': dog_name,
-            'track': track_name or 'All Tracks',
-            'total_runs': 0,
-            'total_wins': 0,
-            'win_percentage': 0.0
+            'runs': '',
+            'wins': '',
+            'win_percent': ''
         }
-        
+
         try:
             # Find the summary table - it's the first table with Runs, Wins, Win %
             tables = soup.find_all('table')
-            
+
             for table in tables:
                 # Look for table with headers "Runs", "Wins", "Win %"
                 headers = table.find_all('th') if table.find('th') else table.find_all('td')
@@ -336,15 +308,144 @@ class DogStatsExtractor:
                             data_row = rows[1]
                             cells = data_row.find_all('td')
                             if len(cells) >= 3:
-                                summary['total_runs'] = int(cells[0].get_text().strip())
-                                summary['total_wins'] = int(cells[1].get_text().strip())
-                                summary['win_percentage'] = float(cells[2].get_text().strip())
+                                summary['runs'] = cells[0].get_text().strip()
+                                summary['wins'] = cells[1].get_text().strip()
+                                summary['win_percent'] = cells[2].get_text().strip()
                                 break
-                                
+
         except Exception as e:
-            print(f"Error extracting summary stats: {e}")
-        
+            print(f"Error extracting raw summary stats: {e}")
+
         return summary
+
+    def _extract_history_table_rows(self, soup, dog_name) -> List[Dict]:
+        """
+        Extract rows from the RAW race history table with headers:
+        Date, Track, Dog, Trap, Grade, Distance, SP, Finish, Sectional, Time,
+        Going, Calc. Time, Rating, Trainer, Video
+        """
+        def normalize(text: str) -> str:
+            return re.sub(r"\s+", " ", text or "").strip()
+
+        tables = soup.find_all('table')
+        results: List[Dict] = []
+        for table in tables:
+            # Collect header texts
+            header_cells = table.find_all('th')
+            if not header_cells:
+                # Some pages use td for headers
+                first_row = table.find('tr')
+                header_cells = first_row.find_all('td') if first_row else []
+            headers = [normalize(h.get_text()) for h in header_cells]
+            # Check if this table matches the expected header subset
+            if headers and all(any(th.lower() in h.lower() for h in headers) for th in ['Date', 'Track', 'Dog', 'Trap', 'Grade']):
+                # Iterate rows after header
+                for row in table.find_all('tr')[1:]:
+                    cells = row.find_all('td')
+                    if not cells:
+                        continue
+                    # Skip AVERAGE/AVERAGES summary row
+                    if normalize(cells[0].get_text()).upper().startswith('AVERAGE'):
+                        continue
+                    # Guard length
+                    if len(cells) < 12:
+                        continue
+                    try:
+                        def cell_text(idx: int) -> str:
+                            return normalize(cells[idx].get_text()) if idx < len(cells) else ''
+
+                        # Date (text inside anchor)
+                        date_text = cell_text(0)
+                        # Track
+                        track_text = cell_text(1)
+                        # Trap column is index 2
+                        trap = ''
+                        cell_trap = cells[2] if len(cells) > 2 else None
+                        if cell_trap:
+                            img = cell_trap.find('img')
+                            if img:
+                                src = img.get('src') or img.get('data-src') or img.get('data-original') or ''
+                                m = re.search(r'trap[_-]?(\d+)', src, re.IGNORECASE)
+                                if m:
+                                    trap = m.group(1)
+                            if not trap:
+                                a = cell_trap.find('a')
+                                if a and a.get('href'):
+                                    m = re.search(r'[?&]trap=(\d+)', a.get('href'), re.IGNORECASE)
+                                    if m:
+                                        trap = m.group(1)
+                            if not trap:
+                                # Check class names or alt/title
+                                cls = ' '.join(cell_trap.get('class', [])).strip()
+                                alt = img.get('alt', '') if img else ''
+                                title = img.get('title', '') if img else ''
+                                combined = ' '.join([cls, alt, title])
+                                m = re.search(r'trap[_-\s]?(\d+)', combined, re.IGNORECASE)
+                                if m:
+                                    trap = m.group(1)
+                            if not trap:
+                                # Last resort: search raw HTML for trap_# pattern
+                                html = str(cell_trap)
+                                m = re.search(r'trap[_-]?(\d+)', html, re.IGNORECASE)
+                                if m:
+                                    trap = m.group(1)
+                            if not trap:
+                                txt = cell_trap.get_text(' ', strip=True)
+                                m = re.search(r'(?:trap|t)\s*(\d+)', txt, re.IGNORECASE)
+                                if m:
+                                    trap = m.group(1)
+                        # Dog (site includes it; also store Dog_Name)
+                        dog_text = cell_text(3) or dog_name
+                        # Grade
+                        grade_text = cell_text(4)
+                        # Distance
+                        distance_text = cell_text(5)
+                        # SP
+                        sp_text = cell_text(6)
+                        # Finish
+                        finish_text = cell_text(7)
+                        # Sectional
+                        sectional_text = cell_text(8)
+                        # Time
+                        time_text = cell_text(9)
+                        # Going
+                        going_text = cell_text(10)
+                        # Calc. Time
+                        calc_time_text = cell_text(11)
+                        # Rating (Chester Rating cell may have nested font/b)
+                        rating_text = cell_text(12) if len(cells) > 12 else ''
+                        # Trainer (anchor text)
+                        trainer_text = cell_text(13) if len(cells) > 13 else ''
+                        # Video (href if present)
+                        video_href = ''
+                        if len(cells) > 14:
+                            a = cells[14].find('a')
+                            if a and a.get('href'):
+                                video_href = a.get('href')
+
+                        results.append({
+                            'Date': date_text,
+                            'Track': track_text,
+                            'Dog': dog_text,
+                            'Trap': trap,
+                            'Grade': grade_text,
+                            'Distance': distance_text,
+                            'SP': sp_text,
+                            'Finish': finish_text,
+                            'Sectional': sectional_text,
+                            'Time': time_text,
+                            'Going': going_text,
+                            'Calc_Time': calc_time_text,
+                            'Rating': rating_text,
+                            'Trainer': trainer_text,
+                            'Video': video_href,
+                        })
+                    except Exception:
+                        continue
+                # Stop after first matching table
+                if results:
+                    break
+        return results
 
     def _extract_race_history(self, soup, dog_name, track_name=None):
         """

@@ -19,6 +19,8 @@ class Config:
     CONFIG_DIR = PROJECT_ROOT / "config"
     # Subfolder specifically for historical results
     RAW_RESULTS_DIR = RAW_DATA_DIR / "results"
+    # Subfolder specifically for dog stats
+    RAW_STATS_DIR = RAW_DATA_DIR / "stats"
     
     # URLs
     RACING_POST_URL = "https://greyhoundbet.racingpost.com/"
@@ -87,6 +89,7 @@ class Config:
             cls.DATA_DIR,
             cls.RAW_DATA_DIR,
             cls.RAW_RESULTS_DIR,
+            cls.RAW_STATS_DIR,
             cls.PROCESSED_DATA_DIR,
             cls.LOGS_DIR,
             cls.CONFIG_DIR
@@ -116,7 +119,9 @@ class Config:
         
         if file_type == "race_results":
             return cls.RAW_RESULTS_DIR / filename
-        if file_type in ["race_cards", "dog_stats"]:
+        if file_type == "dog_stats":
+            return cls.RAW_STATS_DIR / filename
+        if file_type in ["race_cards"]:
             return cls.RAW_DATA_DIR / filename
         elif file_type in ["daily_model", "historical_model"]:
             return cls.PROCESSED_DATA_DIR / filename
