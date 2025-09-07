@@ -320,9 +320,9 @@ class DogStatsExtractor:
 
     def _extract_history_table_rows(self, soup, dog_name) -> List[Dict]:
         """
-        Extract rows from the RAW race history table with headers:
-        Date, Track, Dog, Trap, Grade, Distance, SP, Finish, Sectional, Time,
-        Going, Calc. Time, Rating, Trainer, Video
+    Extract rows from the RAW race history table with headers:
+    Date, Track, Dog, Trap, Grade, Distance, SP, Finish, Sectional, Time,
+    Going, Calc. Time, Rating, Trainer
         """
         def normalize(text: str) -> str:
             return re.sub(r"\s+", " ", text or "").strip()
@@ -416,13 +416,6 @@ class DogStatsExtractor:
                         rating_text = cell_text(12) if len(cells) > 12 else ''
                         # Trainer (anchor text)
                         trainer_text = cell_text(13) if len(cells) > 13 else ''
-                        # Video (href if present)
-                        video_href = ''
-                        if len(cells) > 14:
-                            a = cells[14].find('a')
-                            if a and a.get('href'):
-                                video_href = a.get('href')
-
                         results.append({
                             'Date': date_text,
                             'Track': track_text,
@@ -438,7 +431,6 @@ class DogStatsExtractor:
                             'Calc_Time': calc_time_text,
                             'Rating': rating_text,
                             'Trainer': trainer_text,
-                            'Video': video_href,
                         })
                     except Exception:
                         continue
